@@ -97,41 +97,6 @@ npm install --save-dev @earendil-works/pi-ai @earendil-works/pi-coding-agent @ea
 npx tsc --noEmit stats-footer.ts
 ```
 
-## Releasing to npm
-
-A GitHub Action (`.github/workflows/release.yml`) auto-publishes to npm via trusted publishing (OIDC) on tag push.
-
-1. Bump the version in `package.json` and commit on `main`.
-2. Tag the commit — the tag must match the version, e.g. `v1.0.1`:
-
-   ```bash
-   git tag v1.0.1
-   git push origin v1.0.1
-   ```
-
-3. The workflow verifies the tag/version match, dry-runs `npm pack`, then publishes with [npm provenance](https://docs.npmjs.com/generating-provenance-statements).
-
-### One-time setup
-
-Before the first tag push, bind the GitHub Actions workflow as a trusted publisher. You must be logged into npm:
-
-```bash
-npm adduser                            # if not already logged in (2FA required)
-npm publish --access public             # first publish — creates the package on npm
-# Requires npm >= 11.15.0 for the --allow-publish flag
-npm install -g npm@^11.15.0
-npm trust github pi-status-footer \
-  --repo kslamph/pi-status-footer \
-  --file release.yml \
-  --allow-publish -y
-```
-
-This claims the `pi-status-footer` package name, publishes v1.0.0, and authorises the `release.yml` workflow to publish via OIDC without any token. After this one-time setup, just push a `vX.Y.Z` tag and the action takes over.
-
-### Pre-release versions
-
-Tags like `v1.0.1-beta.1` publish to the `next` dist-tag instead of `latest`.
-
 ## License
 
 MIT — see [LICENSE](./LICENSE).

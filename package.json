@@ -1,6 +1,6 @@
 {
 	"name": "pi-status-footer",
-	"version": "1.0.2",
+	"version": "1.0.3",
 	"description": "Compact two-line status footer for pi: model, thinking level, tokens, TPS, cache hit rate, context usage, live git diff, and working/turn timers.",
 	"keywords": [
 		"pi-package",
