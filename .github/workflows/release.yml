@@ -1,0 +1,77 @@
+name: Release to npm
+
+# Cutting a release:
+#   1. Bump "version" in package.json and commit on main.
+#   2. git tag vX.Y.Z && git push origin vX.Y.Z  (tag must match package.json)
+#
+# Publishing is token-less via npm trusted publishing (OIDC), bound once with:
+#   npm trust github pi-status-footer --repo kslamph/pi-status-footer --file release.yml --allow-publish
+# The workflow can also be triggered manually from the Actions tab; re-runs are
+# safe because versions that are already published are skipped.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # npm trusted publishing (OIDC)
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-npm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org/
+
+      - name: Ensure npm supports trusted publishing (OIDC)
+        run: npm install -g npm@^11.15.0
+
+      - name: Verify tag matches package.json version (tag pushes only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${PKG_VERSION}"
+            exit 1
+          fi
+          echo "Releasing v${PKG_VERSION}"
+
+      - name: Validate tarball contents
+        run: npm pack --dry-run
+
+      - name: Skip if this version is already published
+        id: check
+        run: |
+          PKG=$(node -p "require('./package.json').name")
+          VER=$(node -p "require('./package.json').version")
+          if npm view "$PKG@$VER" version 2>/dev/null; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "$PKG@$VER is already published — nothing to do"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to npm (trusted publishing via OIDC — no token needed)
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          # Pre-release tags (v1.2.0-beta.1, ...) go to the `next` dist-tag so
+          # `latest` is never polluted by pre-releases. Manual runs (branch
+          # ref) publish to `latest`.
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          DIST_TAG="latest"
+          case "$TAG_VERSION" in
+            *-alpha*|*-beta*|*-rc*|*-next*) DIST_TAG="next" ;;
+          esac
+          npm publish --access public --tag "$DIST_TAG"
