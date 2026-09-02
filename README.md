@@ -118,9 +118,12 @@ Before the first tag push, bind the GitHub Actions workflow as a trusted publish
 ```bash
 npm adduser                            # if not already logged in (2FA required)
 npm publish --access public             # first publish — creates the package on npm
+# Requires npm >= 11.15.0 for the --allow-publish flag
+npm install -g npm@^11.15.0
 npm trust github pi-status-footer \
   --repo kslamph/pi-status-footer \
-  --file release.yml -y
+  --file release.yml \
+  --allow-publish -y
 ```
 
 This claims the `pi-status-footer` package name, publishes v1.0.0, and authorises the `release.yml` workflow to publish via OIDC without any token. After this one-time setup, just push a `vX.Y.Z` tag and the action takes over.
