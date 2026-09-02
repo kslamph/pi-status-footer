@@ -114,14 +114,14 @@ A GitHub Action (`.github/workflows/release.yml`) auto-publishes to npm via trus
 Before the first tag push, bind the GitHub Actions workflow as a trusted publisher. You must be logged into npm:
 
 ```bash
-npm adduser                            # if not already logged in
+npm adduser                            # if not already logged in (2FA required)
+npm publish --access public             # first publish — creates the package on npm
 npm trust github pi-status-footer \
   --repo kslamph/pi-status-footer \
-  --file release.yml \
-  --allow-publish
+  --file release.yml -y
 ```
 
-This claims the `pi-status-footer` package name and authorises the `release.yml` workflow to publish via OIDC without any token.
+This claims the `pi-status-footer` package name, publishes v1.0.0, and authorises the `release.yml` workflow to publish via OIDC without any token. After this one-time setup, just push a `vX.Y.Z` tag and the action takes over.
 
 ### Pre-release versions
 

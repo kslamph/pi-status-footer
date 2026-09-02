@@ -5,7 +5,7 @@ name: Release to npm
 #   2. git tag vX.Y.Z && git push origin vX.Y.Z  (tag must match package.json)
 #
 # Publishing is token-less via npm trusted publishing (OIDC), bound once with:
-#   npm trust github pi-status-footer --repo kslamph/pi-status-footer --file release.yml --allow-publish
+#   npm trust github pi-status-footer --repo kslamph/pi-status-footer --file release.yml
 # The workflow can also be triggered manually from the Actions tab; re-runs are
 # safe because versions that are already published are skipped.
 
