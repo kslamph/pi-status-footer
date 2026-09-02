@@ -4,14 +4,16 @@ A compact, zero-config two-line status footer for [pi](https://github.com/earend
 
 ## What it looks like
 
+![pi-status-footer demo](docs/footer-demo.png)
+
 ```
 🤖 openai/gpt-4o 💭 medium  ↑5.2k ↓8.1k ⚡42 t/s  💾63%  📦38%/128k
-📁 my-project ▸  main  +3 -1  ⏱ working 4:32  ⏱ turn 1:18
+📁 my-project ▸  main  +3 -1  ⏳ 4:32  💬 1:18
 ```
 
 **Line 1 — Model & stats:** provider/model, thinking level with themed color, input/output tokens, tokens per second (live while streaming), cache hit rate, context window usage with color-coded fullness (green < 60%, yellow < 80%, red ≥ 80%).
 
-**Line 2 — Project & timers:** repo folder name, git branch, live working-tree diff from HEAD (+N added lines, -M deleted), agent run timer, current turn timer.
+**Line 2 — Project & timers:** repo folder name, git branch, live working-tree diff from HEAD (+N added lines, -M deleted), agent run timer (⏳), current turn timer (💬).
 
 Everything auto-fits to your terminal width — lower-priority segments drop off when space is tight (model name is always shown, truncated if needed).
 
@@ -62,8 +64,8 @@ After installation, the footer appears automatically on the next pi TUI session.
 | 📁 repo | `📁 my-project` | Git repo root basename (from `ctx.cwd` walk-up) |
 | ▸  branch | `▸  main` | `footerData.getGitBranch()`, auto-updates |
 | +N -M diff | `+3 -1` | Async `git diff --shortstat HEAD` (1s debounced) |
-| ⏱ working | `⏱ working 4:32` | Elapsed time since `agent_start`, HH:MM:SS above 1h |
-| ⏱ turn | `⏱ turn 1:18` | Elapsed time since last `turn_start` |
+| ⏳ working | `⏳ 4:32` | Elapsed time since `agent_start`, HH:MM:SS above 1h |
+| 💬 turn | `💬 1:18` | Elapsed time since last `turn_start` |
 
 ## How it works
 

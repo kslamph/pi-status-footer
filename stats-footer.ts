@@ -422,9 +422,10 @@ export default function statsFooter(pi: ExtensionAPI) {
 								gitSegments.push(folderText);
 							}
 						}
+						// ⏳ = work in progress (whole agent run), 💬 = current turn.
 						gitSegments.push(
-							`⏱ ${theme.fg("accent", `working ${formatDuration(elapsed)}`)}`,
-							`⏱ ${theme.fg("accent", `turn ${formatDuration(turnElapsed)}`)}`,
+							`⏳ ${theme.fg("accent", formatDuration(elapsed))}`,
+							`💬 ${theme.fg("accent", formatDuration(turnElapsed))}`,
 						);
 						const gitLine = fitSegments(
 							gitSegments,
