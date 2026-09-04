@@ -256,6 +256,13 @@ export default function statsFooter(pi: ExtensionAPI) {
 	let genStart: number | null = null;
 	let liveOutput = 0;
 	let lastTps: number | null = null;
+	// Characters streamed for the current assistant message (text + thinking
+	// + toolcall deltas). Used to estimate output tokens live, since most
+	// providers only report usage.output at message end.
+	let deltaChars = 0;
+	// Exponentially-averaged chars-per-token ratio, calibrated from each
+	// message's real usage.output at message_end. Default 4 ≈ English prose.
+	let charsPerToken = 4;
 	// Git status: repo folder name + working-tree diff stats (+N -M), fetched
 	// asynchronously (render is synchronous, so results are cached).
 	let sessionCwd: string | null = null;
@@ -309,6 +316,7 @@ export default function statsFooter(pi: ExtensionAPI) {
 		genStart = null;
 		liveOutput = 0;
 		lastTps = null;
+		deltaChars = 0;
 		sessionCwd = ctx.cwd;
 		folderName = basename(ctx.cwd);
 		const repoRoot = findRepoRoot(ctx.cwd);
@@ -481,12 +489,12 @@ export default function statsFooter(pi: ExtensionAPI) {
 		stopTimer();
 		tuiRef = null;
 		runStart = null;
-		lastRunDuration = 0;
 		turnStart = null;
 		lastTurnDuration = 0;
 		genStart = null;
 		liveOutput = 0;
 		lastTps = null;
+		deltaChars = 0;
 		sessionCwd = null;
 		folderName = null;
 		repoName = null;
@@ -498,28 +506,45 @@ export default function statsFooter(pi: ExtensionAPI) {
 	// --- Tokens-per-second tracking ---
 	// Each assistant message's generation window is measured from its
 	// message_start (streaming begins) to message_end (stream done).
-	// message_update carries progressively updated usage.output, giving a
-	// live rate while streaming; message_end carries the final usage, whose
-	// rate is kept as lastTps for display while idle.
+	// Each assistant message's generation window is measured from its
+	// message_start (streaming begins) to message_end (stream done).
+	// message_update carries progressively updated usage.output for providers
+	// that report it (e.g. some gateways); most providers (Anthropic, OpenAI)
+	// only send output usage at message end, so tokens are estimated live from
+	// the streamed delta characters, calibrated by charsPerToken. Real usage
+	// is preferred whenever it is reported and has grown past the estimate;
+	// message_end keeps the final usage's rate as lastTps for display while
+	// idle.
 	pi.on("message_start", (event) => {
 		if (event.message.role !== "assistant") return;
 		genStart = Date.now();
 		liveOutput = (event.message as AssistantMessage).usage?.output ?? 0;
+		deltaChars = 0;
 	});
 	pi.on("message_update", (event) => {
 		if (event.message.role !== "assistant") return;
-		// The raw stream event's partial message carries the most current
-		// usage.output (Anthropic reports it progressively; OpenAI only at the
-		// end), so prefer it over the session message's usage field.
 		const assistantEvent = event.assistantMessageEvent;
+		if (
+			assistantEvent &&
+			"delta" in assistantEvent &&
+			typeof assistantEvent.delta === "string"
+		) {
+			deltaChars += assistantEvent.delta.length;
+		}
 		const partial =
 			assistantEvent && "partial" in assistantEvent
 				? (assistantEvent as { partial?: AssistantMessage }).partial
 				: undefined;
-		const output =
+		const reported =
 			partial?.usage?.output ??
 			(event.message as AssistantMessage).usage?.output;
-		if (typeof output === "number" && output > liveOutput) liveOutput = output;
+		const estimated = Math.round(deltaChars / charsPerToken);
+		const output = Math.max(
+			typeof reported === "number" ? reported : 0,
+			liveOutput,
+			estimated,
+		);
+		if (output > liveOutput) liveOutput = output;
 	});
 	pi.on("message_end", (event) => {
 		if (event.message.role === "assistant") {
@@ -529,8 +554,18 @@ export default function statsFooter(pi: ExtensionAPI) {
 				const tps = computeTps(output, genStart, Date.now());
 				lastTps = tps === null ? null : Math.round(tps);
 			}
+			// Calibrate the live chars-per-token estimate against the real
+			// output token count so the next message's estimate is accurate.
+			if (deltaChars > 0 && output > 0) {
+				const ratio = deltaChars / output;
+				charsPerToken = Math.min(
+					12,
+					Math.max(1.5, charsPerToken * 0.7 + ratio * 0.3),
+				);
+			}
 			genStart = null;
 			liveOutput = 0;
+			deltaChars = 0;
 		}
 		rerender();
 	});
@@ -540,6 +575,7 @@ export default function statsFooter(pi: ExtensionAPI) {
 		lastTps = null;
 		genStart = null;
 		liveOutput = 0;
+		deltaChars = 0;
 		rerender();
 	});
 	pi.on("session_info_changed", rerender);

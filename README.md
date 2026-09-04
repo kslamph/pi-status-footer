@@ -74,7 +74,7 @@ The extension hooks into six pi lifecycle events:
 - **`session_start`** — registers the footer via `ctx.ui.setFooter()`, discovers repo root, starts branch-change listener
 - **`agent_start` / `agent_settled`** — controls the agent-run timer and a 1-second interval that triggers git diff refresh
 - **`turn_start` / `turn_end`** — drives the per-turn timer
-- **`message_start` / `message_update` / `message_end`** — tracks the generation window for live TPS
+- **`message_start` / `message_update` / `message_end`** — tracks the generation window for live TPS. Most providers only report output-token usage at message end, so `message_update` estimates tokens live from the streamed delta characters (text/thinking/toolcall), calibrated against each message's real usage at `message_end`
 - **`model_select`** — clears stale TPS on model switch
 - **`session_shutdown`** — cleans up all state
 
