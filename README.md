@@ -7,15 +7,15 @@ A compact, zero-config two-line status footer for [pi](https://github.com/earend
 ![pi-status-footer demo](docs/footer-demo.png)
 
 ```
-🤖 openai/gpt-4o 💭 medium  ↑5.2k ↓8.1k ⚡42 t/s  💾63%  📦38%/128k
-📁 my-project ▸  main  +3 -1  ⏳ 4:32  💬 1:18
+📦 38%/128k  💾 63%  ↑5.2k ↓8.1k  ⚡42 t/s  ⏳ 4:32  💬 1:18
+📁 my-project ▸  main +3 -1  🤖 openai/ry-very-long-modelid-4o 💭 medium
 ```
 
-**Line 1 — Model & stats:** provider/model, thinking level with themed color, input/output tokens, tokens per second (live while streaming), cache hit rate, context window usage with color-coded fullness (green < 60%, yellow < 80%, red ≥ 80%).
+**Line 1 — Stats & timers:** context window usage with color-coded fullness (green < 60%, yellow < 80%, red ≥ 80%), cache hit rate, input/output tokens, tokens per second (live while streaming), agent run timer (⏳), current turn timer (💬).
 
-**Line 2 — Project & timers:** repo folder name, git branch, live working-tree diff from HEAD (+N added lines, -M deleted), agent run timer (⏳), current turn timer (💬).
+**Line 2 — Project & model:** repo folder name, git branch, live working-tree diff from HEAD (+N added lines, -M deleted), provider/model, thinking level with themed color.
 
-Everything auto-fits to your terminal width — lower-priority segments drop off when space is tight (model name is always shown, truncated if needed).
+Everything auto-fits to your terminal width. Line 1 always keeps every segment (it clips only on very narrow terminals). On line 2 the model is mandatory: the model id is shortened from the left, keeping the provider and thinking level intact — only if even that can't fit does the folder/git group drop off.
 
 ## Features
 
@@ -25,7 +25,8 @@ Everything auto-fits to your terminal width — lower-priority segments drop off
 - **Cache hit rate** — percentage of prompt tokens served from cache
 - **Context gauge** — percentage and raw max; shifts from green → yellow → red as you approach the limit
 - **Thinking level** — color-coded to match pi's thinking theme
-- **Segments drop gracefully** — only the model name is mandatory; everything else fits to width
+- **Responsive model id** — shortened from the left (with an `…` marker) when space is tight, so the provider and thinking level stay fully readable; the folder/git group drops only when the model still can't share the line
+- **Line 1 never drops stats** — every stat segment always renders; on very narrow terminals the line clips instead
 - **East Asian safe** — explicit ambiguous-width handling for CJK-friendly terminals
 - **Safe at all times** — footer rendering never crashes the TUI, even on edge cases
 
@@ -46,26 +47,26 @@ After installation, the footer appears automatically on the next pi TUI session.
 
 ## Display reference
 
-### Line 1 — Model & stats
+### Line 1 — Stats & timers
 
 | Segment | Example | Source |
 |---|---|---|
-| 🤖 model | `🤖 openai/gpt-4o` | `ctx.model.provider / ctx.model.id` |
-| 💭 thinking | `💭 high` | `ctx.thinkingLevel`, themed via `theme.fg()` |
+| 📦context | `📦 38%/128k` | `ctx.getContextUsage()`, color-coded by percent |
+| 💾cache | `💾 63%` | `cacheRead / (input + cacheRead + cacheWrite)` |
 | ↑input ↓output | `↑5.2k ↓8.1k` | Session `usage.input / usage.output` (accumulated across all entries) |
 | ⚡tps | `⚡42 t/s` | Live during generation; last completed rate shown between turns |
-| 💾cache | `💾63%` | `cacheRead / (input + cacheRead + cacheWrite)` |
-| 📦context | `📦38%/128k` | `ctx.getContextUsage()`, color-coded by percent |
+| ⏳ working | `⏳ 4:32` | Elapsed time since `agent_start`, HH:MM:SS above 1h |
+| 💬 turn | `💬 1:18` | Elapsed time since last `turn_start` |
 
-### Line 2 — Project & timers
+### Line 2 — Project & model
 
 | Segment | Example | Source |
 |---|---|---|
 | 📁 repo | `📁 my-project` | Git repo root basename (from `ctx.cwd` walk-up) |
 | ▸  branch | `▸  main` | `footerData.getGitBranch()`, auto-updates |
 | +N -M diff | `+3 -1` | Async `git diff --shortstat HEAD` (1s debounced) |
-| ⏳ working | `⏳ 4:32` | Elapsed time since `agent_start`, HH:MM:SS above 1h |
-| 💬 turn | `💬 1:18` | Elapsed time since last `turn_start` |
+| 🤖 model | `🤖 openai/gpt-4o` | `ctx.model.provider / ctx.model.id`, id shortened from the left when narrow |
+| 💭 thinking | `💭 high` | `ctx.thinkingLevel`, themed via `theme.fg()` |
 
 ## How it works
 

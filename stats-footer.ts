@@ -202,24 +202,94 @@ function joinSegments(segments: string[], separator: string): string {
 	return segments.filter(Boolean).join(separator);
 }
 
-function fitSegments(
-	segments: string[],
-	separator: string,
-	width: number,
+/** Below this terminal width the footer gives up fitting and lets the line
+ *  overflow (the TUI clips it); shortening arithmetic degenerates here. */
+const MIN_FIT_WIDTH = 50;
+
+/**
+ * Shorten a model id by dropping leading characters, keeping the trailing
+ * part (model ids usually end in the distinguishing version, e.g. `...-4o`).
+ * A leading ellipsis marks the cut. Returns "" when nothing fits.
+ */
+export function shortenModelId(
+	id: string,
+	budget: number,
+	ellipsis = "…",
 ): string {
-	if (width <= 0 || segments.length === 0) return "";
-	// The first segment (model + thinking level) has top priority. If it
-	// alone is wider than the terminal, show a truncated prefix of it
-	// instead of skipping it in favor of lower-priority segments.
-	if (measureWidth(segments[0]!) > width) {
-		return truncateSafe(segments[0]!, width, "...");
+	if (budget <= 0) return "";
+	if (measureWidth(id) <= budget) return id;
+	const ellipsisWidth = measureWidth(ellipsis);
+	if (budget < ellipsisWidth) return "";
+	const chars = Array.from(id);
+	for (let start = 0; start < chars.length; start++) {
+		const candidate = ellipsis + chars.slice(start).join("");
+		if (measureWidth(candidate) <= budget) return candidate;
 	}
-	const fitted: string[] = [segments[0]!];
-	for (const segment of segments.slice(1)) {
-		const candidate = joinSegments([...fitted, segment], separator);
-		if (measureWidth(candidate) <= width) fitted.push(segment);
+	return ellipsis;
+}
+
+export interface SecondLineParts {
+	/** Folder/branch/diff group; "" when there is no folder to show. */
+	gitGroup: string;
+	/** Prefix before the provider, e.g. "🤖 ". */
+	modelPrefix: string;
+	/** Provider name; may be "" when no model is selected. */
+	provider: string;
+	/** Model id, shortened from the left when space is tight. */
+	modelId: string;
+	/** Everything after the model id, e.g. " 💭 medium". */
+	modelSuffix: string;
+	/** Between-segment separator. */
+	separator: string;
+	/** Color wrapper applied to the `provider/id` text. */
+	styleModelId?: (text: string) => string;
+}
+
+/**
+ * Line 2 = folder/git group + model segment. The model (provider + thinking
+ * level) is mandatory: when space is tight the model id loses leading
+ * characters first, and if even a bare `provider/` cannot share the line the
+ * whole git group is dropped.
+ */
+export function fitSecondLine(parts: SecondLineParts, width: number): string {
+	const {
+		gitGroup,
+		modelPrefix,
+		provider,
+		modelId,
+		modelSuffix,
+		separator,
+		styleModelId = (text: string) => text,
+	} = parts;
+	const providerPrefix = provider ? `${provider}/` : "";
+	const fixedWidth =
+		measureWidth(modelPrefix) +
+		measureWidth(providerPrefix) +
+		measureWidth(modelSuffix);
+	const buildModel = (budget: number): string | null => {
+		if (fixedWidth > budget) return null;
+		const idText = shortenModelId(modelId, budget - fixedWidth);
+		return `${modelPrefix}${styleModelId(`${providerPrefix}${idText}`)}${modelSuffix}`;
+	};
+
+	const fullModel = buildModel(Number.POSITIVE_INFINITY)!;
+	if (width < MIN_FIT_WIDTH) {
+		// Too narrow to fit meaningfully — render everything and let the TUI clip.
+		return joinSegments([gitGroup, fullModel], separator);
 	}
-	return truncateSafe(joinSegments(fitted, separator), width, "");
+	const maxWidth = Math.max(0, width - SAFETY_MARGIN);
+	if (!gitGroup) return buildModel(maxWidth) ?? fullModel;
+
+	const full = joinSegments([gitGroup, fullModel], separator);
+	if (measureWidth(full) <= maxWidth) return full;
+
+	const withGit = buildModel(
+		maxWidth - measureWidth(gitGroup) - measureWidth(separator),
+	);
+	if (withGit !== null) return joinSegments([gitGroup, withGit], separator);
+
+	// The model alone can't share the line: drop the whole folder/git group.
+	return buildModel(maxWidth) ?? fullModel;
 }
 
 /** Walk up from cwd to find the git repo root directory (or null). */
@@ -358,9 +428,6 @@ export default function statsFooter(pi: ExtensionAPI) {
 							else contextColor = "success";
 						}
 
-						const modelId = ctx.model
-							? `${ctx.model.provider}/${ctx.model.id}`
-							: "no-model";
 						const thinkingLevel = ctx.thinkingLevel || "off";
 						const contextText =
 							contextPercent === null
@@ -385,34 +452,35 @@ export default function statsFooter(pi: ExtensionAPI) {
 						// TPS: live rate while the current assistant message streams,
 						// falling back to the last completed message's rate so the value
 						// keeps a fixed position instead of flashing only at message_end.
-						let tpsSuffix = "";
 						const liveTps =
 							genStart !== null && liveOutput > 0
 								? computeTps(liveOutput, genStart, Date.now())
 								: null;
 						const tpsValue = liveTps ?? lastTps;
-						tpsSuffix = ` ⚡${Math.round(tpsValue ?? 0)} t/s`;
-						// Line 1 — model + tokens/stats, each segment icon-prefixed.
-						const statsLine = fitSegments(
+						// Line 1 — stats only (context, cache, tokens, TPS, timers). Every
+						// segment always renders; on very narrow terminals the line overflows
+						// and the TUI clips it rather than dropping stats.
+						const statsLine = joinSegments(
 							[
-								`🤖 ${theme.fg("accent", modelId)} ${thinkingText}`,
-								theme.fg(
-									"dim",
-									`↑${formatTokens(usage.input)} ↓${formatTokens(usage.output)}${tpsSuffix}`,
-								),
+								`📦 ${theme.fg(contextColor, contextText)}`,
 								theme.fg(
 									"dim",
 									`💾 ${cacheRate === null ? "-" : `${cacheRate.toFixed(0)}%`}`,
 								),
-								`📦 ${theme.fg(contextColor, contextText)}`,
+								theme.fg(
+									"dim",
+									`↑${formatTokens(usage.input)} ↓${formatTokens(usage.output)}`,
+								),
+								theme.fg("dim", `⚡${Math.round(tpsValue ?? 0)} t/s`),
+								`⏳ ${theme.fg("accent", formatDuration(elapsed))}`,
+								`💬 ${theme.fg("accent", formatDuration(turnElapsed))}`,
 							],
 							separator,
-							Math.max(0, width - SAFETY_MARGIN),
 						);
-						// Line 2 — folder/git status + working/turn timers. The folder
-						// name always shows (repo root basename, or plain cwd basename
-						// when not inside a git repo); branch + diff only when git is
-						// present.
+						// Line 2 — folder/git status + model/thinking. The folder name
+						// always shows (repo root basename, or plain cwd basename when
+						// not inside a git repo); branch + diff only when git is present.
+						// The model id is shortened from the left before git is dropped.
 						const branch = footerData.getGitBranch();
 						const gitSegments: string[] = [];
 						if (folderName !== null) {
@@ -430,15 +498,18 @@ export default function statsFooter(pi: ExtensionAPI) {
 								gitSegments.push(folderText);
 							}
 						}
-						// ⏳ = work in progress (whole agent run), 💬 = current turn.
-						gitSegments.push(
-							`⏳ ${theme.fg("accent", formatDuration(elapsed))}`,
-							`💬 ${theme.fg("accent", formatDuration(turnElapsed))}`,
-						);
-						const gitLine = fitSegments(
-							gitSegments,
-							separator,
-							Math.max(0, width - SAFETY_MARGIN),
+						const gitGroup = joinSegments(gitSegments, separator);
+						const gitLine = fitSecondLine(
+							{
+								gitGroup,
+								modelPrefix: "🤖 ",
+								provider: ctx.model?.provider ?? "",
+								modelId: ctx.model?.id ?? "no-model",
+								modelSuffix: ` ${thinkingText}`,
+								separator,
+								styleModelId: (text) => theme.fg("accent", text),
+							},
+							width,
 						);
 
 						return [

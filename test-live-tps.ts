@@ -119,6 +119,26 @@ const second = renderFn!(120).join("\n");
 const secondMatch = second.match(/⚡(\d+) t\/s/);
 assert.ok(secondMatch && Number(secondMatch[1]) > 0, `second message live t/s: ${second}`);
 
+// --- Layout: line 1 = stats + timers, line 2 = folder/git + model/thinking ---
+const layoutLines = renderFn!(120);
+assert.ok(
+	layoutLines[0]!.includes("📦") &&
+		layoutLines[0]!.includes("💾") &&
+		layoutLines[0]!.includes("⏳") &&
+		layoutLines[0]!.includes("💬"),
+	`line 1 holds stats + timers: ${layoutLines[0]}`,
+);
+assert.ok(
+	layoutLines[1]!.includes("📁") &&
+		layoutLines[1]!.includes("🤖") &&
+		layoutLines[1]!.includes("💭"),
+	`line 2 holds folder/git + model/thinking: ${layoutLines[1]}`,
+);
+assert.ok(
+	!layoutLines[0]!.includes("🤖"),
+	`model is not on line 1: ${layoutLines[0]}`,
+);
+
 // --- Reset paths don't throw ---
 emit("message_end", {
 	message: { role: "assistant", usage: { output: 100, input: 10, cacheRead: 0, cacheWrite: 0, cost: { total: 0.001 } } },
