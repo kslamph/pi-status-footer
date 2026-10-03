@@ -1,7 +1,7 @@
 {
 	"name": "pi-status-footer",
-	"version": "1.0.5",
-	"description": "Compact two-line status footer for pi: model, thinking level, tokens, TPS, cache hit rate, context usage, live git diff, and working/turn timers.",
+	"version": "1.0.6",
+	"description": "Compact two-line status footer for pi: model, thinking level, tokens, cost, TPS, cache hit rate, context usage, live git diff, and working/turn timers.",
 	"keywords": [
 		"pi-package",
 		"pi",
@@ -14,6 +14,11 @@
 		"tokens",
 		"tps",
 		"tokens-per-second",
+		"cost",
+		"spend",
+		"usd",
+		"budget",
+		"pricing",
 		"cache",
 		"context",
 		"usage",
@@ -29,7 +34,7 @@
 		"streaming"
 	],
 	"scripts": {
-		"test": "node --experimental-strip-types test-live-tps.ts && node --experimental-strip-types test-layout.ts"
+		"test": "node --experimental-strip-types test-live-tps.ts && node --experimental-strip-types test-layout.ts && node --experimental-strip-types test-cost.ts"
 	},
 	"license": "MIT",
 	"repository": {

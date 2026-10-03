@@ -48,6 +48,42 @@ export function formatDuration(ms: number): string {
 	return `${minutes}:${pad(seconds)}`;
 }
 
+/** Decimals for the session sum and for the per-turn delta. */
+const COST_DECIMALS = 3;
+const COST_DELTA_DECIMALS = 6;
+
+/**
+ * Session cost in USD, fixed to 3 decimals. Fixed decimals rather than
+ * precision that follows the magnitude: the segment width then never changes
+ * as the total grows, and the value is never abbreviated away.
+ *
+ * Fixed decimals also mean no exponential fallback is ever needed. Dividing a
+ * rate by 1e6 twice is a real failure mode on this box (it happened), and
+ * `$0.000000` is a loud, obviously-broken number, whereas `$3.6e-9` could be
+ * read as a plausible price.
+ *
+ * A zero cost with tokens on the clock means the model carries no catalog
+ * pricing (aggregator/custom providers declare no rates, so pi records 0) —
+ * that is missing data, not a free session, so it reads `n/a`. Before any
+ * usage at all it is simply `-`.
+ */
+export function formatCost(usd: number, hasTokens = true): string {
+	if (!Number.isFinite(usd) || usd < 0) return "n/a";
+	if (usd === 0) return hasTokens ? "n/a" : "-";
+	return `$${usd.toFixed(COST_DECIMALS)}`;
+}
+
+/**
+ * Cost added by the current (or last) turn as a `+$x.xxxxxx` suffix, at 6
+ * decimals — a single wokey turn costs cents, so 3 would quantise the delta
+ * to zero. Empty while the turn has not spent anything, so the caller can
+ * append it blindly.
+ */
+export function formatCostDelta(usd: number): string {
+	if (!Number.isFinite(usd) || usd <= 0) return "";
+	return `+$${usd.toFixed(COST_DELTA_DECIMALS)}`;
+}
+
 /**
  * Output tokens per second for an assistant message generation window.
  * Returns null when too little time has elapsed for a meaningful rate.
@@ -345,6 +381,23 @@ export default function statsFooter(pi: ExtensionAPI) {
 	let gitDeleted = 0;
 	let gitFetching = false;
 	let lastGitFetch = 0;
+	// Session-manager handle, kept so turn_start can read the cumulative cost
+	// synchronously (renders are throttled, so a cached total can still be
+	// missing the previous turn's final message when a new turn begins).
+	let sessionManager: { getEntries(): SessionEntry[] } | null = null;
+	// Cumulative session cost at the start of the current turn; the turn's
+	// delta is the current cumulative minus this baseline.
+	let costAtTurnStart = 0;
+
+	/** Cumulative session cost right now, read straight from the session. */
+	const readSessionCost = (): number => {
+		if (sessionManager === null) return 0;
+		try {
+			return collectSessionStats(sessionManager.getEntries()).usage.cost;
+		} catch {
+			return 0;
+		}
+	};
 
 	const rerender = () => tuiRef?.requestRender();
 	const stopTimer = () => {
@@ -388,6 +441,10 @@ export default function statsFooter(pi: ExtensionAPI) {
 		lastTps = null;
 		deltaChars = 0;
 		sessionCwd = ctx.cwd;
+		sessionManager = ctx.sessionManager;
+		// Baseline the turn delta at whatever the (possibly resumed) session
+		// already spent, so a delta only ever appears once a turn runs.
+		costAtTurnStart = readSessionCost();
 		folderName = basename(ctx.cwd);
 		const repoRoot = findRepoRoot(ctx.cwd);
 		repoName = repoRoot === null ? null : basename(repoRoot);
@@ -457,7 +514,22 @@ export default function statsFooter(pi: ExtensionAPI) {
 								? computeTps(liveOutput, genStart, Date.now())
 								: null;
 						const tpsValue = liveTps ?? lastTps;
-						// Line 1 — stats only (context, cache, tokens, TPS, timers). Every
+						// Cost: session sum plus the current turn's delta. Cost is derived
+						// from tokens, and it is the slowest-changing value on the line
+						// (it only ticks up at message boundaries), so it goes last: on a
+						// narrow terminal the right-edge clip drops the cost before the
+						// context/cache/token readouts.
+						const spentTokens =
+							usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+						const turnCost = Math.max(0, usage.cost - costAtTurnStart);
+						const costDelta = formatCostDelta(turnCost);
+						const costSegment =
+							spentTokens === 0
+								? ""
+								: `💰 ${theme.fg("accent", formatCost(usage.cost))}${
+										costDelta === "" ? "" : ` ${theme.fg("dim", costDelta)}`
+									}`;
+					// Line 1 — stats only (context, cache, tokens, TPS, timers, cost). Every
 						// segment always renders; on very narrow terminals the line overflows
 						// and the TUI clips it rather than dropping stats.
 						const statsLine = joinSegments(
@@ -474,6 +546,7 @@ export default function statsFooter(pi: ExtensionAPI) {
 								theme.fg("dim", `⚡${Math.round(tpsValue ?? 0)} t/s`),
 								`⏳ ${theme.fg("accent", formatDuration(elapsed))}`,
 								`💬 ${theme.fg("accent", formatDuration(turnElapsed))}`,
+								costSegment,
 							],
 							separator,
 						);
@@ -550,6 +623,11 @@ export default function statsFooter(pi: ExtensionAPI) {
 	pi.on("turn_start", () => {
 		turnStart = Date.now();
 		lastTurnDuration = 0;
+		// Baseline for the turn's cost delta, read from the session rather
+		// than reused from the last render: agent_settled requests a render,
+		// but that render may not have run yet when the next turn starts,
+		// which would fold the previous turn's cost into this one.
+		costAtTurnStart = readSessionCost();
 	});
 	pi.on("turn_end", () => {
 		if (turnStart !== null) lastTurnDuration = Date.now() - turnStart;
@@ -567,6 +645,8 @@ export default function statsFooter(pi: ExtensionAPI) {
 		lastTps = null;
 		deltaChars = 0;
 		sessionCwd = null;
+		sessionManager = null;
+		costAtTurnStart = 0;
 		folderName = null;
 		repoName = null;
 		gitAdded = 0;
