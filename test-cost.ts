@@ -2,8 +2,9 @@
  * Cost unit tests: formatting tiers, session summation, and the line-1
  * segment (session sum + current turn's delta).
  *
- * The delta is the session cost at `turn_start` subtracted from the current
- * session cost, so it must reset per turn and never leak the previous turn.
+ * The delta is the session cost at `agent_start` subtracted from the current
+ * session cost, so it must reset per run and never leak the previous run — and,
+ * critically, must survive the turn boundaries inside a run.
  *
  * Run: node --experimental-strip-types test-cost.ts
  */
@@ -35,7 +36,7 @@ for (const bad of [3.618468e-9, 0.00200772, 1234.4, 0.1]) {
 // No rates on the model (aggregator providers record cost 0) is missing data,
 // not a free session; no usage at all is a plain dash.
 assert.strictEqual(formatCost(0), "n/a", "zero cost with tokens → n/a");
-assert.strictEqual(formatCost(0, false), "-", "zero cost without tokens → -");
+assert.strictEqual(formatCost(0, false), "$0.000", "no usage → placeholder, not hidden");
 assert.strictEqual(formatCost(Number.NaN), "n/a", "NaN → n/a");
 assert.strictEqual(formatCost(Number.POSITIVE_INFINITY), "n/a", "Infinity → n/a");
 assert.strictEqual(formatCost(-1), "n/a", "negative → n/a");
@@ -132,49 +133,61 @@ const line1 = (): string => renderFn(200)[0]!;
 const sumOf = (): string | null => line1().match(/💰 (\S+)/)?.[1] ?? null;
 const deltaOf = (): string | null => line1().match(/(\+\$[\d.]+)/)?.[1] ?? null;
 
-// The resumed sum shows, but no delta until a turn actually runs.
+// The resumed sum shows, but no delta until a run actually spends.
 assert.strictEqual(sumOf(), "$0.400", `resumed session sum: ${line1()}`);
-assert.strictEqual(deltaOf(), null, `no delta before the first turn: ${line1()}`);
+assert.strictEqual(deltaOf(), null, `no delta before the first run: ${line1()}`);
 
-// Turn 1 spends $0.02.
-emit("turn_start");
+// Run 1 spends $0.02.
+emit("agent_start");
 entries = [...entries, messageEntry("assistant", 0.02)];
-emit("turn_end");
-assert.strictEqual(sumOf(), "$0.420", `sum after turn 1: ${line1()}`);
-assert.strictEqual(deltaOf(), "+$0.020000", `delta is turn 1 only: ${line1()}`);
+emit("agent_settled");
+assert.strictEqual(sumOf(), "$0.420", `sum after run 1: ${line1()}`);
+assert.strictEqual(deltaOf(), "+$0.020000", `delta is run 1: ${line1()}`);
 
-// Turn 2 must not inherit turn 1: the baseline is re-read at turn_start.
+// Run 2 spends $0.10 across two turns. A turn boundary inside the run must NOT
+// reset the delta: in pi a turn is one assistant message, so a per-turn
+// baseline made the value vanish for the whole time the next message streamed.
+emit("agent_start");
+assert.strictEqual(deltaOf(), null, `delta resets at agent_start: ${line1()}`);
 emit("turn_start");
-assert.strictEqual(deltaOf(), null, `delta resets at turn_start: ${line1()}`);
 entries = [...entries, messageEntry("assistant", 0.1)];
+assert.strictEqual(deltaOf(), "+$0.100000", `delta survives a turn boundary: ${line1()}`);
 emit("turn_end");
-assert.strictEqual(sumOf(), "$0.520", `sum after turn 2: ${line1()}`);
-assert.strictEqual(deltaOf(), "+$0.100000", `delta excludes turn 1: ${line1()}`);
-
-// The delta tracks the live turn: it grows as the turn spends, and a turn
-// that spends nothing renders no delta at all.
+assert.strictEqual(deltaOf(), "+$0.100000", `delta survives turn_end: ${line1()}`);
 emit("turn_start");
-entries = [...entries, messageEntry("assistant", 0.25)];
-assert.strictEqual(deltaOf(), "+$0.250000", `delta grows within the turn: ${line1()}`);
+entries = [...entries, messageEntry("assistant", 0.15)];
+assert.strictEqual(deltaOf(), "+$0.250000", `delta accumulates across turns: ${line1()}`);
 emit("turn_end");
+emit("agent_settled");
+assert.strictEqual(sumOf(), "$0.670", `sum after run 2: ${line1()}`);
+assert.strictEqual(deltaOf(), "+$0.250000", `delta frozen once the run settles: ${line1()}`);
+
+// Run 3 starts a fresh delta, excluding run 2.
+emit("agent_start");
+assert.strictEqual(deltaOf(), null, `new run resets the delta: ${line1()}`);
+entries = [...entries, messageEntry("assistant", 0.25)];
+assert.strictEqual(deltaOf(), "+$0.250000", `delta grows within the run: ${line1()}`);
+assert.strictEqual(sumOf(), "$0.920", `sum keeps accumulating: ${line1()}`);
 
 // Tokens spent but the model declares no pricing → n/a, not $0.00.
 emit("session_shutdown");
 entries = [messageEntry("assistant", 0)];
 renderFn = startSession();
+emit("agent_start");
 assert.strictEqual(sumOf(), "n/a", `unpriced model → n/a: ${line1()}`);
 assert.strictEqual(deltaOf(), null, `no delta when nothing is billed: ${line1()}`);
 
-// Empty session: no cost segment at all (nothing spent, nothing to report).
+// Empty session: the segment still renders, as a placeholder.
 emit("session_shutdown");
 entries = [];
 renderFn = startSession();
-assert.strictEqual(sumOf(), null, `no 💰 before any usage: ${line1()}`);
+assert.strictEqual(sumOf(), "$0.000", `placeholder before any usage: ${line1()}`);
+assert.ok(line1().includes("\u{1F4B0}"), `cost segment present from the start: ${line1()}`);
 
 // Back to a priced session for the layout assertions.
 entries = [messageEntry("assistant", 0.2)];
 renderFn = startSession();
-emit("turn_start");
+emit("agent_start");
 entries = [...entries, messageEntry("assistant", 0.05)];
 
 // A stale baseline (cost lower than the recorded baseline — e.g. entries
@@ -188,8 +201,9 @@ assert.ok(
 const finalLines = renderFn(200);
 assert.ok(finalLines[0]!.includes("💰"), `cost on line 1: ${finalLines[0]}`);
 assert.ok(
-	finalLines[0]!.indexOf("💬") < finalLines[0]!.indexOf("💰"),
-	`cost is the last segment: ${finalLines[0]}`,
+	finalLines[0]!.indexOf("\u2191") < finalLines[0]!.indexOf("\u{1F4B0}") &&
+		finalLines[0]!.indexOf("\u{1F4B0}") < finalLines[0]!.indexOf("t/s"),
+	`cost sits between the token counters and t/s: ${finalLines[0]}`,
 );
 assert.ok(
 	!finalLines[1]!.includes("💰"),
@@ -203,9 +217,9 @@ emit("model_select");
 emit("session_shutdown");
 
 console.log("✓ formatCost: fixed 3 decimals, rounded, never exponential");
-console.log("✓ formatCost: unpriced models read n/a, no usage reads -");
+console.log("✓ formatCost: unpriced models read n/a, no usage shows the $0.000 placeholder");
 console.log("✓ formatCostDelta: 6 decimals, omitted at zero, +$ prefix otherwise");
 console.log("✓ collectSessionStats: cost summed across all usage-bearing entries");
-console.log("✓ render: session sum shown, no delta before the first turn");
-console.log("✓ render: delta covers the current turn only, resets per turn");
-console.log("✓ render: cost is the last line-1 segment (clips first when narrow)");
+console.log("✓ render: session sum shown, no delta before the first run");
+console.log("✓ render: delta covers the current run, survives turn boundaries");
+console.log("✓ render: placeholder at session start; cost sits between tokens and t/s");
