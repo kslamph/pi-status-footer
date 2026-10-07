@@ -129,6 +129,16 @@ export function collectSessionStats(entries: readonly SessionEntry[]): {
 		}
 		if (entry.type === "branch_summary" || entry.type === "compaction") {
 			addUsage(usage, entry.usage);
+			continue;
+		}
+		// Model work outside the conversation — today only cache warming
+		// (`kind: "cache_warm"`) — is recorded *only* as a usage entry: no
+		// assistant message, no tool result. Pi counts these in session
+		// totals (docs/session-format.md), so skipping them would under-report
+		// cost, tokens and the cache-hit rate against `/session`. Unknown
+		// kinds are counted like any other usage, per the same doc.
+		if (entry.type === "usage") {
+			addUsage(usage, entry.usage);
 		}
 	}
 

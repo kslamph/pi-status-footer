@@ -10,6 +10,7 @@
  */
 import assert from "node:assert";
 import statsFooter, {
+	calculateCacheHitRate,
 	collectSessionStats,
 	formatCost,
 	formatCostDelta,
@@ -74,6 +75,39 @@ assert.strictEqual(
 	summed.usage.cost,
 	0.28,
 	"cost summed across assistant/toolResult/compaction/branch_summary",
+);
+
+// Cache warming records its model calls as standalone `usage` entries — no
+// assistant message, no tool result — so this is the only place that spend
+// can appear. Pi counts them in session totals, so the footer must too.
+// Warming is almost pure cache-read (cacheWrite/input/output ~0), which is
+// what makes it move the cache-hit rate rather than just the total.
+const warmUsageOf = (cost: number, cacheRead = 50_000) => ({
+	input: 0,
+	output: 0,
+	cacheRead,
+	cacheWrite: 0,
+	totalTokens: cacheRead,
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: cost },
+});
+
+const warmed = collectSessionStats([
+	{ type: "usage", kind: "cache_warm", provider: "anthropic", model: "m", usage: warmUsageOf(0.015) },
+] as any);
+assert.strictEqual(warmed.usage.cost, 0.015, "usage entries count toward session cost");
+assert.strictEqual(warmed.usage.cacheRead, 50_000, "usage entries count toward cache-read tokens");
+
+const withWarm = collectSessionStats([
+	messageEntry("assistant", 0.2),
+	{ type: "usage", kind: "cache_warm", usage: warmUsageOf(0.015) },
+] as any);
+assert.ok(
+	Math.abs(withWarm.usage.cost - 0.215) < 1e-9,
+	`warming adds to, not replaces, message cost (${withWarm.usage.cost})`,
+);
+assert.ok(
+	calculateCacheHitRate(withWarm.usage) > calculateCacheHitRate(summed.usage),
+	`warming feeds the cache-hit rate (${calculateCacheHitRate(summed.usage)}% → ${calculateCacheHitRate(withWarm.usage)}%)`,
 );
 
 // --- Render: session sum + per-turn delta ---------------------------------
@@ -220,6 +254,7 @@ console.log("✓ formatCost: fixed 3 decimals, rounded, never exponential");
 console.log("✓ formatCost: unpriced models read n/a, no usage shows the $0.000 placeholder");
 console.log("✓ formatCostDelta: 6 decimals, omitted at zero, +$ prefix otherwise");
 console.log("✓ collectSessionStats: cost summed across all usage-bearing entries");
+console.log("✓ collectSessionStats: cache-warm usage entries counted (cost, tokens, hit rate)");
 console.log("✓ render: session sum shown, no delta before the first run");
 console.log("✓ render: delta covers the current run, survives turn boundaries");
 console.log("✓ render: placeholder at session start; cost sits between tokens and t/s");
