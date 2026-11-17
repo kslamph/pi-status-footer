@@ -1,6 +1,6 @@
 # pi-status-footer
 
-Compact two-line status footer for the pi TUI: context usage, tokens, cost, live TPS, git diff, and run timers.
+Compact status footer for the pi TUI: context usage, tokens, cost, live TPS, git diff, and run timers, plus an optional third line for other extensions' status segments.
 
 See [pi.dev docs](https://pi.dev) for how extensions work.
 
@@ -8,7 +8,7 @@ See [pi.dev docs](https://pi.dev) for how extensions work.
 
 | Extension | Command / shortcut | What it does |
 |---|---|---|
-| `stats-footer.ts` | (no command; TUI footer widget) | Renders a two-line footer: line 1 stats/timers, line 2 folder, git branch/diff, model, thinking level |
+| `stats-footer.ts` | (no command; TUI footer widget) | Renders a footer: line 1 stats/timers, line 2 folder, git branch/diff, model, thinking level, and a conditional line 3 carrying statuses other extensions set via `ctx.ui.setStatus()` |
 
 It registers no slash commands, shortcuts, flags, tools, or providers. It hooks session/agent/turn/message events (`session_start`, `agent_start`, `agent_settled`, `turn_start/end`, `message_start/update/end`, `model_select`, `thinking_level_select`, `session_info_changed`, `session_shutdown`) to update the footer.
 
@@ -36,9 +36,12 @@ Just run `pi` in the TUI. Example footer:
 ```
 📦 38%/128k  💾 63%  ↑5.2k ↓8.1k  💰 $0.420 +$0.020000  ⚡42 t/s  ⏳ 4:32  💬 1:18
 📁 my-project ▸  main +3 -1  🤖 openai/gpt-4o 💭 medium
+ bg 1 running · Shift↓
 ```
 
 Line 1: context used/limit, cache hit rate, input/output tokens, session cost + current-run delta, tokens/sec (live while streaming, last rate when idle), agent-run timer, current-turn timer. Line 2: folder (repo root, or cwd outside a repo), branch, working-tree diff vs HEAD, provider/model, thinking level. Narrow terminals shorten the model id from the left first; the folder/git group drops only if the model still can't fit.
+
+Line 3 is conditional: it appears only while an extension has status text registered through `ctx.ui.setStatus()` (for example `pi-background-tasks`'s `bg 1 running · Shift↓`, or `pi-subagents` progress), and it disappears as soon as the last status clears, so the footer returns to its two-line height. Segments keep their own styling and are truncated to the terminal width like the other lines. This matters because a custom footer replaces pi's built-in footer: a footer that never reads those statuses hides other extensions' progress entirely.
 
 ## Configuration
 

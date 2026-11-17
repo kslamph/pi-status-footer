@@ -14,6 +14,7 @@ import statsFooter, {
 	collectSessionStats,
 	formatCost,
 	formatCostDelta,
+	measureWidth,
 } from "./stats-footer.ts";
 
 // --- formatCost: precision tiers -----------------------------------------
@@ -126,9 +127,12 @@ const emit = (name: string, event?: any, ctx?: any) => {
 
 const tui = { requestRender() {} };
 const theme = { fg(_color: string, text: string) { return text; } };
+// Extension statuses from ctx.ui.setStatus(); mutated per scenario below.
+let extensionStatuses = new Map<string, string>();
 const footerData = {
 	onBranchChange() { return () => {}; },
 	getGitBranch() { return "main"; },
+	getExtensionStatuses() { return extensionStatuses; },
 };
 
 let entries: any[] = [];
@@ -244,6 +248,56 @@ assert.ok(
 	`cost is not on line 2: ${finalLines[1]}`,
 );
 
+// Extension statuses: appended as an optional third line, never as a row of
+// their own when empty, and truncated like the other lines.
+
+extensionStatuses = new Map();
+assert.strictEqual(
+	renderFn(200).length,
+	2,
+	`no statuses → footer stays two lines: ${String(renderFn(200).length)}`,
+);
+
+extensionStatuses = new Map([["background-tasks", " bg 1 running · Shift↓ "]]);
+const withStatus = renderFn(200);
+assert.strictEqual(
+	withStatus.length,
+	3,
+	`a status segment adds a third line: ${String(withStatus.length)}`,
+);
+assert.ok(
+	withStatus[2]!.includes("bg 1 running"),
+	`bg segment renders on line 3: ${withStatus[2]}`,
+);
+assert.ok(
+	!withStatus[2]!.includes("\n"),
+	`the third line is a single row: ${withStatus[2]}`,
+);
+
+const narrowStatus = renderFn(40)[2]!;
+assert.ok(
+	measureWidth(narrowStatus) <= 40,
+	`third line truncated to width: ${narrowStatus} (${String(measureWidth(narrowStatus))})`,
+);
+
+extensionStatuses = new Map([["blank", "   "]]);
+assert.strictEqual(
+	renderFn(200).length,
+	2,
+	"whitespace-only statuses never add an empty row",
+);
+
+extensionStatuses = new Map([
+	["background-tasks", "bg 1 running"],
+	["another-extension", "other-info"],
+]);
+const multiStatus = renderFn(200)[2]!;
+assert.ok(
+	multiStatus.indexOf("bg 1 running") < multiStatus.indexOf("other-info"),
+	`multiple statuses share the line in insertion order: ${multiStatus}`,
+);
+extensionStatuses = new Map();
+
 // Reset paths don't throw.
 emit("agent_settled");
 emit("turn_end");
@@ -256,5 +310,6 @@ console.log("✓ formatCostDelta: 6 decimals, omitted at zero, +$ prefix otherwi
 console.log("✓ collectSessionStats: cost summed across all usage-bearing entries");
 console.log("✓ collectSessionStats: cache-warm usage entries counted (cost, tokens, hit rate)");
 console.log("✓ render: session sum shown, no delta before the first run");
+console.log("✓ render: status segments append an optional third line, truncated to width");
 console.log("✓ render: delta covers the current run, survives turn boundaries");
 console.log("✓ render: placeholder at session start; cost sits between tokens and t/s");

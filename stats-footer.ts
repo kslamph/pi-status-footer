@@ -603,9 +603,24 @@ export default function statsFooter(pi: ExtensionAPI) {
 							width,
 						);
 
+						// Extension statuses set via ctx.ui.setStatus() are rendered by
+						// the built-in footer, which this custom footer replaces. Surface
+						// them on an optional third line so status segments from other
+						// extensions (background tasks, subagent runs) stay visible.
+						// Older hosts without getExtensionStatuses() keep the two lines.
+						const extensionStatusLine = joinSegments(
+							Array.from(footerData.getExtensionStatuses?.()?.values() ?? [])
+								.map((text) => text.trim())
+								.filter(Boolean),
+							separator,
+						);
+
 						return [
 							truncateSafe(statsLine, width, ""),
 							truncateSafe(gitLine, width, ""),
+							...(extensionStatusLine
+								? [truncateSafe(extensionStatusLine, width, "")]
+								: []),
 						];
 					} catch {
 						// Footer rendering must never crash the TUI, even on very
